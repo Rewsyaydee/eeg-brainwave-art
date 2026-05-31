@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EEG Brainwave Art — NEURODRIVE</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:#0a0a0f; overflow:hidden; font-family:'Courier New',monospace; }
+  canvas { display:block; }
+  #overlay { position:fixed; bottom:20px; left:20px; color:#555; font-size:11px; z-index:10; }
+  #info { position:fixed; top:20px; right:20px; color:#888; font-size:12px; text-align:right; z-index:10; line-height:1.6; }
+  #info .val { color:#fff; font-weight:bold; }
+  #hint { position:fixed; bottom:20px; right:20px; color:#444; font-size:11px; z-index:10; }
+</style>
+</head>
+<body>
+<div id="overlay">NEURODRIVE — EEG Brainwave Art</div>
+<div id="info">
+  <span style="color:#ff5555">⬤ Gamma</span> >30Hz<br>
+  <span style="color:#ffaa44">⬤ Beta</span> 13–30Hz<br>
+  <span style="color:#44dd44">⬤ Alpha</span> 8–13Hz<br>
+  <span style="color:#44cccc">⬤ Theta</span> 4–8Hz<br>
+  <span style="color:#6666ff">⬤ Delta</span> 0.5–4Hz<br>
+  <br>ANXIETY <span class="val" id="anxVal">0%</span>
+</div>
+<div id="hint">↑↓ mouse = anxiety level | auto-cycles</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+<script>
+const BANDS = [
+  { name:'Delta', fMin:0.5, fMax:4,   r:100, g:100, b:255, amp:60 },
+  { name:'Theta', fMin:4,   fMax:8,   r:50,  g:200, b:200, amp:45 },
+  { name:'Alpha', fMin:8,   fMax:13,  r:80,  g:240, b:80,  amp:35 },
+  { name:'Beta',  fMin:13,  fMax:30,  r:255, g:180, b:50,  amp:25 },
+  { name:'Gamma', fMin:30,  fMax:100, r:255, g:100, b:100, amp:15 },
+];
+
+let anxiety = 0;       // 0=calm, 1=anxious (smoothed)
+let targetAnxiety = 0; // raw target
+let autoPhase = 0;
+let particles = [];
+let time = 0;
+
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  noFill();
+  for (let i=0; i<60; i++) particles.push({x:random(width), y:random(height), s:random(1,2.5), ph:random(TWO_PI)});
+}
+
+function draw() {
+  // Auto-cycle anxiety (slow 45s period)
+  autoPhase += 0.00035;
+  let autoTarget = map(sin(autoPhase), -1, 1, 0, 1);
+  // Ease: hold at extremes longer
+  autoTarget = pow(autoTarget, 0.6);
+
+  // Mouse override
+  if (mouseY > 0 && mouseY < height) {
+    targetAnxiety = map(mouseY, 0, height, 0, 1);
+  } else {
+    targetAnxiety = autoTarget;
+  }
+
+  // Smooth transition
+  anxiety += (targetAnxiety - anxiety) * 0.03;
+
+  // Background gradient (cool blue → warm red based on anxiety)
+  let bgR = lerp(10, 25, anxiety);
+  let bgG = lerp(10, 8, anxiety);
+  let bgB = lerp(30, 12, anxiety);
+  background(bgR, bgG, bgB);
+
+  // Subtle grid
+  stroke(255,255,255, 3 + anxiety*5);
+  strokeWeight(0.5);
+  let gs = 60;
+  for (let x=0; x<width; x+=gs) line(x,0,x,height);
+  for (let y=0; y<height; y+=gs) line(0,y,width,y);
+
+  // Draw wave bands
+  let bandH = height / (BANDS.length + 1);
+  let startY = bandH * 0.7;
+
+  for (let i=0; i<BANDS.length; i++) {
+    let b = BANDS[i];
+    let yCenter = startY + i * bandH;
+    drawBand(b, yCenter, bandH * 0.7, i);
+  }
+
+  // Anxiety meter bar on left
+  drawAnxietyMeter();
+
+  // Floating particles (electrode sparks)
+  drawParticles();
+
+  // Center label
+  drawCenterLabel();
+
+  // Update info
+  document.getElementById('anxVal').textContent = floor(anxiety*100) + '%';
+
+  time += 0.016;
+}
+
+function drawBand(band, yCenter, halfH, idx) {
+  // In anxious state: higher frequency, more erratic, more jagged
+  let baseFreq = lerp(band.fMin, band.fMax, anxiety);
+  let chaos = pow(anxiety, 2) * 8; // extra frequency jitter
+  let amp = band.amp * (1 + anxiety * 0.4);
+
+  // Glow layer
+  stroke(band.r, band.g, band.b, 15 + anxiety*20);
+  strokeWeight(amp * 1.8);
+  beginShape();
+  for (let x=0; x<=width; x+=3) {
+    let nx = x * 0.003;
+    let y = yCenter;
+    // Composite wave: 3-4 sine components
+    y += sin(nx * baseFreq * 1.0 + time * 1.3) * amp * 0.6;
+    y += sin(nx * baseFreq * 0.5 + time * 0.7) * amp * 0.3;
+    y += sin(nx * baseFreq * 2.1 + time * 2.0 + chaos) * amp * 0.25 * anxiety;
+    y += sin(nx * baseFreq * 3.5 + time * 3.5 + chaos*2) * amp * 0.15 * anxiety;
+    // Noise injection when anxious
+    y += (noise(x*0.01, time*2) - 0.5) * amp * anxiety * 1.5;
+    vertex(x, y);
+  }
+  endShape();
+
+  // Core line
+  stroke(band.r, band.g, band.b, 180 + anxiety*75);
+  strokeWeight(1.5 + anxiety*1.5);
+  beginShape();
+  for (let x=0; x<=width; x+=3) {
+    let nx = x * 0.003;
+    let y = yCenter;
+    y += sin(nx * baseFreq * 1.0 + time * 1.3) * amp * 0.55;
+    y += sin(nx * baseFreq * 0.5 + time * 0.7) * amp * 0.25;
+    y += sin(nx * baseFreq * 2.1 + time * 2.0 + chaos) * amp * 0.2 * anxiety;
+    y += (noise(x*0.01, time*2) - 0.5) * amp * anxiety * 1.2;
+    vertex(x, y);
+  }
+  endShape();
+
+  // Band label
+  let labelAlpha = map(anxiety, 0, 1, 140, 60);
+  fill(band.r, band.g, band.b, labelAlpha);
+  noStroke();
+  textSize(11);
+  textAlign(RIGHT);
+  text(band.name + ' ' + floor(lerp(band.fMin,band.fMax,anxiety)) + 'Hz', width-30, yCenter-halfH-4);
+}
+
+function drawAnxietyMeter() {
+  let mw=6, mh=height*0.6, mx=25, my=(height-mh)/2;
+  // Track
+  stroke(255,255,255,20);
+  strokeWeight(mw+4);
+  line(mx, my, mx, my+mh);
+  // Fill
+  let fillH = mh * anxiety;
+  stroke(255, lerp(100,30,anxiety), lerp(30,30,anxiety), 200);
+  strokeWeight(mw);
+  line(mx, my+mh-fillH, mx, my+mh);
+  // Labels
+  fill(255,255,255,60); noStroke(); textSize(9); textAlign(CENTER);
+  text('CALM', mx, my-8);
+  text('ANXIOUS', mx, my+mh+16);
+}
+
+function drawCenterLabel() {
+  let state = anxiety < 0.25 ? 'RESTING' : anxiety < 0.5 ? 'RELAXED' : anxiety < 0.75 ? 'ALERT' : 'ANXIOUS';
+  let cr = anxiety < 0.5 ? lerp(100,255,anxiety*2) : 255;
+  let cg = anxiety < 0.5 ? 255 : lerp(255,60,(anxiety-0.5)*2);
+  let cb = anxiety < 0.5 ? lerp(255,60,anxiety*2) : 60;
+  fill(cr, cg, cb, 20 + anxiety*30);
+  noStroke();
+  textAlign(CENTER);
+  textSize(18 + anxiety*6);
+  text(state, width/2, height/2);
+  if (anxiety > 0.7) {
+    textSize(12); fill(255,60,60,100);
+    text('⚠ HIGH AROUSAL', width/2, height/2 + 28);
+  }
+}
+
+function drawParticles() {
+  for (let p of particles) {
+    p.ph += 0.02 + anxiety * 0.08;
+    p.y += sin(p.ph) * (0.3 + anxiety * 1.5);
+    p.x += cos(p.ph*1.7) * (0.2 + anxiety * 0.8);
+    // Wrap
+    if (p.x<0) p.x=width; if (p.x>width) p.x=0;
+    if (p.y<0) p.y=height; if (p.y>height) p.y=0;
+    let pr = lerp(100,255,anxiety);
+    let pg = lerp(180,60,anxiety);
+    let pb = lerp(255,60,anxiety);
+    fill(pr, pg, pb, 80 + anxiety*120);
+    noStroke();
+    circle(p.x, p.y, p.s + anxiety*1.5);
+  }
+}
+
+function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+</script>
+</body>
+</html>
